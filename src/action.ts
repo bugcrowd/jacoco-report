@@ -184,7 +184,7 @@ async function getChangedFiles(
         repo: github.context.repo.repo,
         branch: defaultBranch,
       })
-      core.info(response.data)
+
       baseRef = response.data?.commit?.sha
       if (debugMode) {
         core.info(`Base commit for branch ${defaultBranch}:  ${baseRef}`)

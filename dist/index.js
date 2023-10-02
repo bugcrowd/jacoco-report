@@ -184,7 +184,6 @@ function getChangedFiles(defaultBranch, base, head, client, debugMode) {
                     repo: github.context.repo.repo,
                     branch: defaultBranch,
                 });
-                core.info(response.data);
                 baseRef = (_b = (_a = response.data) === null || _a === void 0 ? void 0 : _a.commit) === null || _b === void 0 ? void 0 : _b.sha;
                 if (debugMode) {
                     core.info(`Base commit for branch ${defaultBranch}:  ${baseRef}`);
