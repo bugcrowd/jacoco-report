@@ -7,7 +7,7 @@ import {parseBooleans} from 'xml2js/lib/processors'
 import * as glob from '@actions/glob'
 import {getProjectCoverage} from './process'
 import {getPRComment, getTitle} from './render'
-import {debug, getChangedLines} from './util'
+import {debug, getChangedLines, getIssueNumberFromCommitPullsList} from './util'
 import {Project} from './models/project'
 import {ChangedFile} from './models/github'
 
@@ -53,9 +53,10 @@ export async function action(): Promise<void> {
       core.info(`failEmoji: ${failEmoji}`)
     }
 
+    const client = github.getOctokit(token)
     let base: string
     let head: string
-    let prNumber: number | undefined
+    let prNumber: number | undefined | null
     switch (event) {
       case 'pull_request':
       case 'pull_request_target':
@@ -66,6 +67,13 @@ export async function action(): Promise<void> {
       case 'push':
         base = github.context.payload.before
         head = github.context.payload.after
+        if (debugMode) core.info(`Fetching PR number from Pull Request`)
+        prNumber = await getIssueNumberFromCommitPullsList(
+          client,
+          github.context.repo.owner,
+          github.context.repo.repo,
+          github.context.sha
+        )
         break
       default:
         core.setFailed(
@@ -77,11 +85,16 @@ export async function action(): Promise<void> {
     core.info(`base sha: ${base}`)
     core.info(`head sha: ${head}`)
 
-    const client = github.getOctokit(token)
-
+    const defaultBranch = github.context.payload?.repository?.default_branch
     if (debugMode) core.info(`reportPaths: ${reportPaths}`)
     const reportsJsonAsync = getJsonReports(reportPaths, debugMode)
-    const changedFiles = await getChangedFiles(base, head, client, debugMode)
+    const changedFiles = await getChangedFiles(
+      defaultBranch,
+      base,
+      head,
+      client,
+      debugMode
+    )
     if (debugMode) core.info(`changedFiles: ${debug(changedFiles)}`)
 
     const reportsJson = await reportsJsonAsync
@@ -151,28 +164,53 @@ async function getJsonReports(
 }
 
 async function getChangedFiles(
+  defaultBranch: string,
   base: string,
   head: string,
   client: any,
   debugMode: boolean
 ): Promise<ChangedFile[]> {
-  const response = await client.rest.repos.compareCommits({
-    base,
-    head,
-    owner: github.context.repo.owner,
-    repo: github.context.repo.repo,
-  })
-
   const changedFiles: ChangedFile[] = []
-  for (const file of response.data.files) {
-    if (debugMode) core.info(`file: ${debug(file)}`)
-    const changedFile: ChangedFile = {
-      filePath: file.filename,
-      url: file.blob_url,
-      lines: getChangedLines(file.patch),
+  try {
+    let baseRef = base
+
+    // On initial PR creation base_ref is null
+    if (base === '0000000000000000000000000000000000000000') {
+      if (debugMode) {
+        core.info(`Getting commit from branch: ${defaultBranch}`)
+      }
+      const response = await client.rest.repos.getBranch({
+        owner: github.context.repo.owner,
+        repo: github.context.repo.repo,
+        branch: defaultBranch,
+      })
+      core.info(response.data)
+      baseRef = response.data?.commit?.sha
+      if (debugMode) {
+        core.info(`Base commit for branch ${defaultBranch}:  ${baseRef}`)
+      }
     }
-    changedFiles.push(changedFile)
+
+    const response = await client.rest.repos.compareCommits({
+      base: baseRef,
+      head,
+      owner: github.context.repo.owner,
+      repo: github.context.repo.repo,
+    })
+
+    for (const file of response.data.files) {
+      if (debugMode) core.info(`file: ${debug(file)}`)
+      const changedFile: ChangedFile = {
+        filePath: file.filename,
+        url: file.blob_url,
+        lines: getChangedLines(file.patch),
+      }
+      changedFiles.push(changedFile)
+    }
+  } catch (e) {
+    core.info(`Unable to compare commits between ${base} and ${head}: ${e}`)
   }
+
   return changedFiles
 }
 
