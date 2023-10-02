@@ -1,4 +1,5 @@
 import {JacocoFile} from './models/jacoco'
+import {GitHub} from '@actions/github/lib/utils'
 
 export const TAG = {
   SELF: '$',
@@ -102,4 +103,22 @@ export function getFilesWithCoverage(packages: any): JacocoFile[] {
     }
   }
   return files
+}
+
+//  Copied from
+// https://github.com/mshick/add-pr-comment/blob/main/src/issues.ts
+export async function getIssueNumberFromCommitPullsList(
+  octokit: InstanceType<typeof GitHub>,
+  owner: string,
+  repo: string,
+  commitSha: string
+): Promise<number | null> {
+  const commitPullsList =
+    await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+      owner,
+      repo,
+      commit_sha: commitSha,
+    })
+
+  return commitPullsList.data.length ? commitPullsList.data?.[0].number : null
 }

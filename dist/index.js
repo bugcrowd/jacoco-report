@@ -54,7 +54,7 @@ const process_1 = __nccwpck_require__(8578);
 const render_1 = __nccwpck_require__(8523);
 const util_1 = __nccwpck_require__(1597);
 function action() {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
         let continueOnError = true;
         try {
@@ -89,6 +89,7 @@ function action() {
                 core.info(`passEmoji: ${passEmoji}`);
                 core.info(`failEmoji: ${failEmoji}`);
             }
+            const client = github.getOctokit(token);
             let base;
             let head;
             let prNumber;
@@ -102,6 +103,9 @@ function action() {
                 case 'push':
                     base = github.context.payload.before;
                     head = github.context.payload.after;
+                    if (debugMode)
+                        core.info(`Fetching PR number from Pull Request`);
+                    prNumber = yield (0, util_1.getIssueNumberFromCommitPullsList)(client, github.context.repo.owner, github.context.repo.repo, github.context.sha);
                     break;
                 default:
                     core.setFailed(`Only pull requests and pushes are supported, ${github.context.eventName} not supported.`);
@@ -109,11 +113,11 @@ function action() {
             }
             core.info(`base sha: ${base}`);
             core.info(`head sha: ${head}`);
-            const client = github.getOctokit(token);
+            const defaultBranch = (_e = (_d = github.context.payload) === null || _d === void 0 ? void 0 : _d.repository) === null || _e === void 0 ? void 0 : _e.default_branch;
             if (debugMode)
                 core.info(`reportPaths: ${reportPaths}`);
             const reportsJsonAsync = getJsonReports(reportPaths, debugMode);
-            const changedFiles = yield getChangedFiles(base, head, client, debugMode);
+            const changedFiles = yield getChangedFiles(defaultBranch, base, head, client, debugMode);
             if (debugMode)
                 core.info(`changedFiles: ${(0, util_1.debug)(changedFiles)}`);
             const reportsJson = yield reportsJsonAsync;
@@ -121,7 +125,7 @@ function action() {
             const project = (0, process_1.getProjectCoverage)(reports, changedFiles);
             if (debugMode)
                 core.info(`project: ${(0, util_1.debug)(project)}`);
-            core.setOutput('coverage-overall', parseFloat(((_d = project.overall.percentage) !== null && _d !== void 0 ? _d : 0).toFixed(2)));
+            core.setOutput('coverage-overall', parseFloat(((_f = project.overall.percentage) !== null && _f !== void 0 ? _f : 0).toFixed(2)));
             core.setOutput('coverage-changed-files', parseFloat(project['coverage-changed-files'].toFixed(2)));
             const skip = skipIfNoChanges && project.modules.length === 0;
             if (debugMode)
@@ -164,24 +168,46 @@ function getJsonReports(xmlPaths, debugMode) {
         })));
     });
 }
-function getChangedFiles(base, head, client, debugMode) {
+function getChangedFiles(defaultBranch, base, head, client, debugMode) {
+    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
-        const response = yield client.rest.repos.compareCommits({
-            base,
-            head,
-            owner: github.context.repo.owner,
-            repo: github.context.repo.repo,
-        });
         const changedFiles = [];
-        for (const file of response.data.files) {
-            if (debugMode)
-                core.info(`file: ${(0, util_1.debug)(file)}`);
-            const changedFile = {
-                filePath: file.filename,
-                url: file.blob_url,
-                lines: (0, util_1.getChangedLines)(file.patch),
-            };
-            changedFiles.push(changedFile);
+        try {
+            let baseRef = base;
+            // On initial PR creation base_ref is null
+            if (base === '0000000000000000000000000000000000000000') {
+                if (debugMode) {
+                    core.info(`Getting commit from branch: ${defaultBranch}`);
+                }
+                const response = yield client.rest.repos.getBranch({
+                    owner: github.context.repo.owner,
+                    repo: github.context.repo.repo,
+                    branch: defaultBranch,
+                });
+                baseRef = (_b = (_a = response.data) === null || _a === void 0 ? void 0 : _a.commit) === null || _b === void 0 ? void 0 : _b.sha;
+                if (debugMode) {
+                    core.info(`Base commit for branch ${defaultBranch}:  ${baseRef}`);
+                }
+            }
+            const response = yield client.rest.repos.compareCommits({
+                base: baseRef,
+                head,
+                owner: github.context.repo.owner,
+                repo: github.context.repo.repo,
+            });
+            for (const file of response.data.files) {
+                if (debugMode)
+                    core.info(`file: ${(0, util_1.debug)(file)}`);
+                const changedFile = {
+                    filePath: file.filename,
+                    url: file.blob_url,
+                    lines: (0, util_1.getChangedLines)(file.patch),
+                };
+                changedFiles.push(changedFile);
+            }
+        }
+        catch (e) {
+            core.info(`Unable to compare commits between ${base} and ${head}: ${e}`);
         }
         return changedFiles;
     });
@@ -564,12 +590,21 @@ function toFloat(value) {
 /***/ }),
 
 /***/ 1597:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ (function(__unused_webpack_module, exports) {
 
 "use strict";
 
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getFilesWithCoverage = exports.getChangedLines = exports.debug = exports.TAG = void 0;
+exports.getIssueNumberFromCommitPullsList = exports.getFilesWithCoverage = exports.getChangedLines = exports.debug = exports.TAG = void 0;
 exports.TAG = {
     SELF: '$',
     SOURCE_FILE: 'sourcefile',
@@ -668,6 +703,20 @@ function getFilesWithCoverage(packages) {
     return files;
 }
 exports.getFilesWithCoverage = getFilesWithCoverage;
+//  Copied from
+// https://github.com/mshick/add-pr-comment/blob/main/src/issues.ts
+function getIssueNumberFromCommitPullsList(octokit, owner, repo, commitSha) {
+    var _a;
+    return __awaiter(this, void 0, void 0, function* () {
+        const commitPullsList = yield octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+            owner,
+            repo,
+            commit_sha: commitSha,
+        });
+        return commitPullsList.data.length ? (_a = commitPullsList.data) === null || _a === void 0 ? void 0 : _a[0].number : null;
+    });
+}
+exports.getIssueNumberFromCommitPullsList = getIssueNumberFromCommitPullsList;
 
 
 /***/ }),
